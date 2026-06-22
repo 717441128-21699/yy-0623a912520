@@ -3,7 +3,7 @@ import {
   CreditCard, Wallet, Banknote, Clock, Sparkles, Layers, User2,
   Store, BarChart3, LineChart as LineChartIcon, CalendarRange,
 } from 'lucide-react';
-import { useAppStore, STORES, CATEGORIES, CONSULTANTS } from '@/store/useAppStore';
+import { useAppStore, STORES, CATEGORIES, CONSULTANTS, PROJECTS } from '@/store/useAppStore';
 import { StatCard } from '@/components/common/StatCard';
 import { FilterBar } from '@/components/common/FilterBar';
 import { CardStatusBadge } from '@/components/common/StatusBadge';
@@ -34,6 +34,7 @@ export const CardOverview: React.FC = () => {
     return courseCards.filter(c => {
       if (filters.storeIds.length > 0 && !filters.storeIds.includes(c.storeId)) return false;
       if (filters.categoryIds.length > 0 && !filters.categoryIds.includes(c.categoryId)) return false;
+      if (filters.projectIds.length > 0 && !filters.projectIds.includes(c.projectId)) return false;
       if (filters.consultantIds.length > 0 && !filters.consultantIds.includes(c.consultantId)) return false;
       if (c.saleDate < filters.dateFrom || c.saleDate > filters.dateTo) return false;
       if (kw) {
@@ -155,14 +156,20 @@ export const CardOverview: React.FC = () => {
         unserved: s.unserved,
       }));
     }
-    const projMap = new Map<string, number>();
+    const projMap = new Map<string, { saleAmount: number; cardCount: number; unserved: number }>();
     filteredCards.forEach(c => {
-      projMap.set(c.projectName, (projMap.get(c.projectName) || 0) + c.saleAmount);
+      if (!projMap.has(c.projectName)) {
+        projMap.set(c.projectName, { saleAmount: 0, cardCount: 0, unserved: 0 });
+      }
+      const entry = projMap.get(c.projectName)!;
+      entry.saleAmount += c.saleAmount;
+      entry.cardCount += 1;
+      entry.unserved += c.remainingSessions;
     });
     return Array.from(projMap.entries())
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => b[1].saleAmount - a[1].saleAmount)
       .slice(0, 12)
-      .map(([label, value]) => ({ label, value, cardCount: 0, unserved: 0 }));
+      .map(([label, data]) => ({ label, value: data.saleAmount, cardCount: data.cardCount, unserved: data.unserved }));
   }, [statView, storeBarData, consultantBarData, filteredCards]);
 
   const trendUnit: 'currency' | 'number' = trendMetric === 'saleAmount' ? 'currency' : 'number';
@@ -249,15 +256,18 @@ export const CardOverview: React.FC = () => {
       <FilterBar
         stores={STORES.map(s => ({ value: s.id, label: s.name }))}
         categories={CATEGORIES.map(c => ({ value: c.id, label: c.name }))}
+        projects={PROJECTS.map(p => ({ value: p.id, label: p.name }))}
         consultants={CONSULTANTS.map(c => ({ value: c.id, label: c.name }))}
         selectedStoreIds={filters.storeIds}
         selectedCategoryIds={filters.categoryIds}
+        selectedProjectIds={filters.projectIds}
         selectedConsultantIds={filters.consultantIds}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
         searchKeyword={filters.searchKeyword}
         onStoresChange={(ids) => setFilters({ storeIds: ids })}
         onCategoriesChange={(ids) => setFilters({ categoryIds: ids })}
+        onProjectsChange={(ids) => setFilters({ projectIds: ids })}
         onConsultantsChange={(ids) => setFilters({ consultantIds: ids })}
         onDateFromChange={(v) => setFilters({ dateFrom: v })}
         onDateToChange={(v) => setFilters({ dateTo: v })}

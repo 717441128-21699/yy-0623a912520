@@ -6,15 +6,18 @@ interface FilterOption { value: string; label: string; }
 interface Props {
   stores?: FilterOption[];
   categories?: FilterOption[];
+  projects?: FilterOption[];
   consultants?: FilterOption[];
   selectedStoreIds: string[];
   selectedCategoryIds: string[];
+  selectedProjectIds: string[];
   selectedConsultantIds: string[];
   dateFrom: string;
   dateTo: string;
   searchKeyword: string;
   onStoresChange: (ids: string[]) => void;
   onCategoriesChange: (ids: string[]) => void;
+  onProjectsChange: (ids: string[]) => void;
   onConsultantsChange: (ids: string[]) => void;
   onDateFromChange: (v: string) => void;
   onDateToChange: (v: string) => void;
@@ -89,10 +92,10 @@ const MultiSelect: React.FC<{
 };
 
 export const FilterBar: React.FC<Props> = ({
-  stores = [], categories = [], consultants = [],
-  selectedStoreIds, selectedCategoryIds, selectedConsultantIds,
+  stores = [], categories = [], projects = [], consultants = [],
+  selectedStoreIds, selectedCategoryIds, selectedProjectIds, selectedConsultantIds,
   dateFrom, dateTo, searchKeyword,
-  onStoresChange, onCategoriesChange, onConsultantsChange,
+  onStoresChange, onCategoriesChange, onProjectsChange, onConsultantsChange,
   onDateFromChange, onDateToChange, onSearchChange, onReset,
   showConsultant = true, extraFilters,
 }) => {
@@ -109,14 +112,14 @@ export const FilterBar: React.FC<Props> = ({
             placeholder="全部门店"
           />
         )}
-        {categories.length > 0 && (
+        {projects.length > 0 && (
           <MultiSelect
-            label="项目类别"
+            label="具体项目"
             icon={<Layers size={16} />}
-            options={categories}
-            values={selectedCategoryIds}
-            onChange={onCategoriesChange}
-            placeholder="全部类别"
+            options={projects}
+            values={selectedProjectIds}
+            onChange={onProjectsChange}
+            placeholder="全部项目"
           />
         )}
         {showConsultant && consultants.length > 0 && (

@@ -119,15 +119,18 @@ export const RedemptionFlow: React.FC = () => {
       <FilterBar
         stores={STORES.map(s => ({ value: s.id, label: s.name }))}
         categories={[]}
+        projects={[]}
         consultants={[]}
         selectedStoreIds={filters.storeIds}
         selectedCategoryIds={[]}
+        selectedProjectIds={[]}
         selectedConsultantIds={[]}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
         searchKeyword={filters.searchKeyword}
         onStoresChange={(ids) => setFilters({ storeIds: ids })}
         onCategoriesChange={() => {}}
+        onProjectsChange={() => {}}
         onConsultantsChange={() => {}}
         onDateFromChange={(v) => setFilters({ dateFrom: v })}
         onDateToChange={(v) => setFilters({ dateTo: v })}

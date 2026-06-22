@@ -12,11 +12,12 @@ import type {
   FulfillmentPressure, ApprovalRequest, MonthlyRevenueTrend, RevenueBreakdown, ReconLogItem,
 } from '@/shared/types';
 import { STORES as _STORES } from '@/data/seed/stores';
-import { CATEGORIES as _CATEGORIES } from '@/data/seed/projects';
+import { CATEGORIES as _CATEGORIES, PROJECTS as _PROJECTS } from '@/data/seed/projects';
 import { CONSULTANTS as _CONSULTANTS } from '@/data/seed/consultants';
 
 export const STORES = _STORES;
 export const CATEGORIES = _CATEGORIES;
+export const PROJECTS = _PROJECTS;
 export const CONSULTANTS = _CONSULTANTS;
 
 // ============ localStorage 持久化 key ============
@@ -50,6 +51,7 @@ const DATA_HASH = `cards=180|reds=260|stores=${STORES.length}|cons=${CONSULTANTS
 export interface Filters {
   storeIds: string[];
   categoryIds: string[];
+  projectIds: string[];
   consultantIds: string[];
   dateFrom: string;
   dateTo: string;
@@ -124,6 +126,7 @@ const makeDefaultFilters = (): Filters => {
   return {
     storeIds: [],
     categoryIds: [],
+    projectIds: [],
     consultantIds: [],
     dateFrom: from.toISOString().slice(0, 10),
     dateTo: now.toISOString().slice(0, 10),
@@ -165,7 +168,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       safeLSDel(LS_KEYS.riskCards);
       safeLSDel(LS_KEYS.approvalRequests);
       Object.keys(localStorage).forEach(k => {
-        if (k.startsWith(LS_KEYS.reconLogs)) safeLSDel(k);
+        if (k.startsWith(LS_KEYS.reconLogs) || k.startsWith('aesthetic_recon_meta_')) safeLSDel(k);
       });
       safeLSSet(LS_KEYS.seedHash, DATA_HASH);
     }
@@ -189,7 +192,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 加载各门店已有的对账处理日志
     reconSummaries.forEach(rs => {
       const cachedLogs = safeLSGet<ReconLogItem[] | null>(buildStoreLogsKey(rs.storeId), null);
-      if (cachedLogs && cachedLogs.length > 0) rs.reconLogs = cachedLogs;
+      if (cachedLogs && cachedLogs.length > 0) {
+        rs.reconLogs = cachedLogs;
+        const allIds = (rs.diffSources || []).map(d => d.id);
+        const allChecked = allIds.length > 0 && allIds.every(id => cachedLogs.some(l => l.sourceId === id));
+        if (allChecked) {
+          rs.reconStatus = 'finished';
+        } else if (cachedLogs.length > 0) {
+          rs.reconStatus = 'processing';
+        }
+        const metaKey = `aesthetic_recon_meta_${rs.storeId}`;
+        const meta = safeLSGet<{ reconStatus?: string; reconFinishedTime?: string; reconFinishedBy?: string } | null>(metaKey, null);
+        if (meta) {
+          if (meta.reconStatus) rs.reconStatus = meta.reconStatus as StoreReconSummary['reconStatus'];
+          if (meta.reconFinishedTime) rs.reconFinishedTime = meta.reconFinishedTime;
+          if (meta.reconFinishedBy) rs.reconFinishedBy = meta.reconFinishedBy;
+        } else if (allChecked && !rs.reconFinishedTime) {
+          const lastLog = cachedLogs[cachedLogs.length - 1];
+          rs.reconFinishedTime = lastLog.checkTime;
+          rs.reconFinishedBy = lastLog.checker;
+        }
+      }
     });
 
     // ========= 风险卡：首次基于 seed + 严格审计规则生成 =========
@@ -236,7 +259,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     safeLSDel(LS_KEYS.riskCards);
     safeLSDel(LS_KEYS.approvalRequests);
     Object.keys(localStorage).forEach(k => {
-      if (k.startsWith(LS_KEYS.reconLogs)) safeLSDel(k);
+      if (k.startsWith(LS_KEYS.reconLogs) || k.startsWith('aesthetic_recon_meta_')) safeLSDel(k);
     });
     safeLSDel(LS_KEYS.seedHash);
     set({ initialized: false });
@@ -333,7 +356,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set(s => {
       const store = s.storeReconSummaries.find(r => r.storeId === storeId);
       if (!store) return {};
-      const newLogs: ReconLogItem[] = checkedIds.map(sid => ({
+      const existingSourceIds = new Set((store.reconLogs || []).map(l => l.sourceId));
+      const newIds = checkedIds.filter(id => !existingSourceIds.has(id));
+      if (newIds.length === 0) return {};
+      const newLogs: ReconLogItem[] = newIds.map(sid => ({
         id: `RL${Date.now()}_${sid}`,
         sourceId: sid,
         checked: true,
@@ -346,7 +372,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const nextSummaries = s.storeReconSummaries.map(r => {
         if (r.storeId !== storeId) return r;
-        // 所有diffSource的id都已checked → finished
         const allIds = (r.diffSources || []).map(d => d.id);
         const allChecked = allIds.length > 0 && allIds.every(id => mergedLogs.find(l => l.sourceId === id));
         const next: StoreReconSummary = {
@@ -361,8 +386,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         return next;
       });
 
-      // 持久化门店对账处理日志
       safeLSSet(buildStoreLogsKey(storeId), mergedLogs);
+
+      const reconStatusKey = `aesthetic_recon_meta_${storeId}`;
+      const updatedStore = nextSummaries.find(r => r.storeId === storeId)!;
+      safeLSSet(reconStatusKey, {
+        reconStatus: updatedStore.reconStatus,
+        reconFinishedTime: updatedStore.reconFinishedTime,
+        reconFinishedBy: updatedStore.reconFinishedBy,
+      });
 
       return { storeReconSummaries: nextSummaries };
     });

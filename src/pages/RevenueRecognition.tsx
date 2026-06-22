@@ -150,15 +150,18 @@ export const RevenueRecognition: React.FC = () => {
       <FilterBar
         stores={STORES.map(s => ({ value: s.id, label: s.name }))}
         categories={CATEGORIES.map(c => ({ value: c.id, label: c.name }))}
+        projects={[]}
         consultants={[]}
         selectedStoreIds={filters.storeIds}
         selectedCategoryIds={filters.categoryIds}
+        selectedProjectIds={[]}
         selectedConsultantIds={[]}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
         searchKeyword={filters.searchKeyword}
         onStoresChange={(ids) => setFilters({ storeIds: ids })}
         onCategoriesChange={(ids) => setFilters({ categoryIds: ids })}
+        onProjectsChange={() => {}}
         onConsultantsChange={() => {}}
         onDateFromChange={(v) => setFilters({ dateFrom: v })}
         onDateToChange={(v) => setFilters({ dateTo: v })}

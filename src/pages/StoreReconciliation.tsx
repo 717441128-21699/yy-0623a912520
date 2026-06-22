@@ -35,12 +35,20 @@ export const StoreReconciliation: React.FC = () => {
   const [reconOpinion, setReconOpinion] = useState('');
   const [adjustmentAmount, setAdjustmentAmount] = useState<string>('');
 
+  const liveSelectedStore = useMemo(() => {
+    if (!selectedStore) return null;
+    return storeReconSummaries.find(r => r.storeId === selectedStore.storeId) || selectedStore;
+  }, [selectedStore, storeReconSummaries]);
+
   useEffect(() => {
     if (selectedStore && drillTab === 'diff') {
-      const alreadyChecked = (selectedStore.reconLogs || []).map(l => l.sourceId);
-      setCheckedDiffIds(alreadyChecked);
+      const alreadyChecked = (liveSelectedStore?.reconLogs || []).map(l => l.sourceId);
+      setCheckedDiffIds(prev => {
+        const merged = new Set([...prev, ...alreadyChecked]);
+        return Array.from(merged);
+      });
     }
-  }, [selectedStore, drillTab]);
+  }, [selectedStore, drillTab, liveSelectedStore?.reconLogs?.length]);
 
   const overallStats = useMemo(() => {
     const totalOpening = storeReconSummaries.reduce((s, r) => s + r.openingBalance, 0);
@@ -473,7 +481,7 @@ export const StoreReconciliation: React.FC = () => {
               <span className="font-semibold">{selectedStore.storeName}</span>
               <span className="text-zinc-500">·</span>
               <span className="text-sm text-zinc-500">对账明细钻取</span>
-              {renderReconStatusBadge(selectedStore.reconStatus, Math.abs(selectedStore.difference) >= 0.01)}
+              {renderReconStatusBadge(liveSelectedStore?.reconStatus, Math.abs(selectedStore.difference) >= 0.01)}
             </div>
           )
         }
@@ -523,17 +531,17 @@ export const StoreReconciliation: React.FC = () => {
                 )}
               </button>
               <button
-                onClick={() => setDrillTab('logs')}
-                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5
-                  ${drillTab === 'logs' ? 'bg-white text-primary-700 shadow-sm' : 'text-zinc-600 hover:text-zinc-800'}`}
-              >
-                <CheckSquare size={14}/> 对账处理记录
-                {(selectedStore.reconLogs?.length ?? 0) > 0 && (
-                  <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
-                    {selectedStore.reconLogs?.length}
-                  </span>
-                )}
-              </button>
+                  onClick={() => setDrillTab('logs')}
+                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5
+                    ${drillTab === 'logs' ? 'bg-white text-primary-700 shadow-sm' : 'text-zinc-600 hover:text-zinc-800'}`}
+                >
+                  <CheckSquare size={14}/> 对账处理记录
+                  {(liveSelectedStore?.reconLogs?.length ?? 0) > 0 && (
+                    <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
+                      {liveSelectedStore?.reconLogs?.length}
+                    </span>
+                  )}
+                </button>
             </div>
 
             {drillTab === 'project' && (
@@ -639,7 +647,7 @@ export const StoreReconciliation: React.FC = () => {
                         </thead>
                         <tbody>
                           {storeDetail.diffSources.map((d, i) => {
-                            const alreadyLogged = (selectedStore.reconLogs || []).some(l => l.sourceId === d.id);
+                            const alreadyLogged = (liveSelectedStore?.reconLogs || []).some(l => l.sourceId === d.id);
                             const checked = checkedDiffIds.includes(d.id);
                             const meta = DIFF_TYPE_META[d.type];
                             return (
@@ -692,7 +700,7 @@ export const StoreReconciliation: React.FC = () => {
                   )}
                 </div>
 
-                {selectedStore.reconStatus !== 'finished' && storeDetail.diffSources.length > 0 && (
+                {liveSelectedStore?.reconStatus !== 'finished' && storeDetail.diffSources.length > 0 && (
                   <div className="p-4 rounded-xl border-2 border-primary-200 bg-gradient-to-br from-primary-50/60 via-white to-white space-y-3">
                     <div className="flex items-center gap-2 text-xs text-primary-700 font-semibold">
                       <MessageSquare size={13}/> 对账处理提交
@@ -736,13 +744,13 @@ export const StoreReconciliation: React.FC = () => {
                   </div>
                 )}
 
-                {selectedStore.reconStatus === 'finished' && (
+                {liveSelectedStore?.reconStatus === 'finished' && (
                   <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center gap-3">
                     <CheckCircle2 size={22} className="text-emerald-600 shrink-0"/>
                     <div className="text-sm">
                       <div className="font-semibold text-emerald-800">门店对账已完成</div>
                       <div className="text-emerald-700 mt-0.5">
-                        处理人：{selectedStore.reconFinishedBy || '-'} · 完成时间：{selectedStore.reconFinishedTime ? formatDateTime(selectedStore.reconFinishedTime) : '-'}
+                        处理人：{liveSelectedStore?.reconFinishedBy || '-'} · 完成时间：{liveSelectedStore?.reconFinishedTime ? formatDateTime(liveSelectedStore.reconFinishedTime) : '-'}
                       </div>
                     </div>
                   </div>
@@ -752,7 +760,7 @@ export const StoreReconciliation: React.FC = () => {
 
             {drillTab === 'logs' && (
               <div className="rounded-xl border border-zinc-200 overflow-hidden">
-                {(selectedStore.reconLogs?.length ?? 0) === 0 ? (
+                {(liveSelectedStore?.reconLogs?.length ?? 0) === 0 ? (
                   <div className="px-4 py-16 text-center">
                     <FileText size={40} className="text-zinc-300 mx-auto mb-3"/>
                     <div className="text-sm text-zinc-500">暂无对账处理记录</div>
@@ -771,7 +779,7 @@ export const StoreReconciliation: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {[...(selectedStore.reconLogs || [])].reverse().map((l, i) => {
+                        {[...(liveSelectedStore?.reconLogs || [])].reverse().map((l, i) => {
                           const src = storeDetail.diffSources.find(d => d.id === l.sourceId);
                           const meta = src ? DIFF_TYPE_META[src.type] : null;
                           return (
