@@ -71,6 +71,23 @@ export type RiskType = 'longIdle' | 'frequentChange' | 'manualDeduction' | 'nega
 export type RiskLevel = 'high' | 'medium' | 'low';
 export type RiskProcessingStatus = 'pending' | 'reviewing' | 'resolved' | 'ignored';
 
+export interface RiskTriggerEvidence {
+  /** 触发风险时的关键次数（负余次：超用次数；长期未消费：未消费天数；频繁改卡：30天改卡次数；手工补扣：手工次数；过期核销：过期后天数） */
+  triggerCount: number;
+  /** 触发阈值（审计规则口径） */
+  threshold: number;
+  /** 触发原始日期 */
+  triggerDate: string;
+  /** 最近一次核销时间（若存在） */
+  lastRedemptionDate?: string | null;
+  /** 最近一次核销次数和金额摘要 */
+  lastRedemptionInfo?: { sessions: number; amount: number; operator?: string } | null;
+  /** 卡内原始次数快照（销售时/当前对比） */
+  sessionSnapshot?: { originalTotal: number; used: number; remaining: number };
+  /** 触发备注 */
+  detail?: string;
+}
+
 export interface RiskCard {
   id: string;
   cardNo: string;
@@ -85,6 +102,35 @@ export interface RiskCard {
   assignee: string;
   description: string;
   operationLogs: RiskOperationLog[];
+  /** 风险触发原始证据（严格审计规则计算） */
+  evidence: RiskTriggerEvidence;
+}
+
+export type DiffSourceType = 'refund' | 'transfer' | 'redemption' | 'sale' | 'manual';
+
+export interface DiffSourceItem {
+  id: string;
+  type: DiffSourceType;
+  sourceNo: string;
+  date: string;
+  description: string;
+  theoreticalAmount: number;
+  actualAmount: number;
+  difference: number;
+  cardNo?: string;
+  customerName?: string;
+  operator?: string;
+  remark?: string;
+}
+
+export interface ReconLogItem {
+  id: string;
+  sourceId: string;
+  checked: boolean;
+  checker: string;
+  checkTime: string;
+  checkOpinion: string;
+  adjustmentAmount?: number;
 }
 
 export interface StoreReconSummary {
@@ -101,6 +147,14 @@ export interface StoreReconSummary {
   difference: number;
   pendingSessionsTotal: number;
   pendingAmountTotal: number;
+  /** 差异来源明细 */
+  diffSources?: DiffSourceItem[];
+  /** 对账处理记录 */
+  reconLogs?: ReconLogItem[];
+  /** 对账完成状态 */
+  reconStatus?: 'draft' | 'processing' | 'finished';
+  reconFinishedTime?: string;
+  reconFinishedBy?: string;
 }
 
 export interface FulfillmentPressure {

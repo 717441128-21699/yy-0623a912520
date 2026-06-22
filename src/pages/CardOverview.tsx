@@ -1,6 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  CreditCard, Wallet, Banknote, Clock, Sparkles, Layers,
+  CreditCard, Wallet, Banknote, Clock, Sparkles, Layers, User2,
+  Store, BarChart3, LineChart as LineChartIcon, CalendarRange,
 } from 'lucide-react';
 import { useAppStore, STORES, CATEGORIES, CONSULTANTS } from '@/store/useAppStore';
 import { StatCard } from '@/components/common/StatCard';
@@ -8,16 +9,25 @@ import { FilterBar } from '@/components/common/FilterBar';
 import { CardStatusBadge } from '@/components/common/StatusBadge';
 import { BarChartCard } from '@/components/charts/BarChartCard';
 import { PieChartCard } from '@/components/charts/PieChartCard';
+import { LineChartCard } from '@/components/charts/LineChartCard';
 import {
   formatCurrencyCompact, formatCurrency, formatDate, formatPercent, formatNumber,
 } from '@/utils/formatters';
 import { calculateFulfillmentRate } from '@/utils/calculations';
+import type { PieDataItem } from '@/components/charts/PieChartCard';
+
+type StatView = 'store' | 'project' | 'consultant';
+type TrendMetric = 'saleAmount' | 'cardCount' | 'unservedSessions';
+
+const PIE_COLORS = ['#0F4C5C', '#E36414', '#2A9D8F', '#84bfc6', '#f4a261', '#e9c46a', '#264653', '#d62828', '#457B9D'];
 
 export const CardOverview: React.FC = () => {
   const {
-    courseCards, overviewStats, storeSaleStats, projectDistribution,
+    courseCards, overviewStats,
     filters, setFilters, resetFilters,
   } = useAppStore();
+  const [statView, setStatView] = useState<StatView>('store');
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('saleAmount');
 
   const filteredCards = useMemo(() => {
     const kw = filters.searchKeyword.trim().toLowerCase();
@@ -35,7 +45,7 @@ export const CardOverview: React.FC = () => {
   }, [courseCards, filters]);
 
   const computedStats = useMemo(() => {
-    if (!overviewStats || filteredCards.length === courseCards.length) return overviewStats;
+    if (filteredCards.length === courseCards.length && overviewStats) return overviewStats;
     const totalSale = filteredCards.reduce((s, c) => s + c.saleAmount, 0);
     const totalSess = filteredCards.reduce((s, c) => s + c.totalSessions, 0);
     const totalRedeemed = filteredCards.reduce((s, c) => s + c.redeemedAmount, 0);
@@ -60,6 +70,102 @@ export const CardOverview: React.FC = () => {
       redeemedAmountTrend: overviewStats?.redeemedAmountTrend || 0,
     };
   }, [filteredCards, courseCards.length, overviewStats]);
+
+  const storeBarData = useMemo(() => {
+    const map = new Map<string, { name: string; saleAmount: number; cardCount: number; unserved: number }>();
+    STORES.forEach(s => map.set(s.id, { name: s.name, saleAmount: 0, cardCount: 0, unserved: 0 }));
+    filteredCards.forEach(c => {
+      const entry = map.get(c.storeId);
+      if (entry) {
+        entry.saleAmount += c.saleAmount;
+        entry.cardCount += 1;
+        entry.unserved += c.remainingSessions;
+      }
+    });
+    return Array.from(map.values());
+  }, [filteredCards]);
+
+  const projectPieData = useMemo((): PieDataItem[] => {
+    const map = new Map<string, number>();
+    filteredCards.forEach(c => {
+      const cur = map.get(c.categoryName) || 0;
+      map.set(c.categoryName, cur + c.saleAmount);
+    });
+    const items = Array.from(map.entries()).map(([name, value], i) => ({
+      name, value, color: PIE_COLORS[i % PIE_COLORS.length],
+    }));
+    const total = items.reduce((s, x) => s + x.value, 0);
+    if (total > 0) {
+      return items.map(x => ({ ...x, value: x.value, percent: x.value / total }));
+    }
+    return items;
+  }, [filteredCards]);
+
+  const consultantBarData = useMemo(() => {
+    const map = new Map<string, { name: string; saleAmount: number; cardCount: number; unserved: number }>();
+    filteredCards.forEach(c => {
+      if (!map.has(c.consultantId)) {
+        map.set(c.consultantId, { name: c.consultantName, saleAmount: 0, cardCount: 0, unserved: 0 });
+      }
+      const entry = map.get(c.consultantId)!;
+      entry.saleAmount += c.saleAmount;
+      entry.cardCount += 1;
+      entry.unserved += c.remainingSessions;
+    });
+    return Array.from(map.values()).sort((a, b) => b.saleAmount - a.saleAmount).slice(0, 12);
+  }, [filteredCards]);
+
+  const dateTrendData = useMemo(() => {
+    const bucket = new Map<string, { saleAmount: number; cardCount: number; unservedSessions: number }>();
+    filteredCards.forEach(c => {
+      const key = c.saleDate.slice(0, 7);
+      if (!bucket.has(key)) bucket.set(key, { saleAmount: 0, cardCount: 0, unservedSessions: 0 });
+      const e = bucket.get(key)!;
+      e.saleAmount += c.saleAmount;
+      e.cardCount += 1;
+      e.unservedSessions += c.remainingSessions;
+    });
+    const keys = Array.from(bucket.keys()).sort();
+    return keys.map(k => {
+      const e = bucket.get(k)!;
+      const [y, m] = k.split('-');
+      return {
+        label: `${y.slice(2)}/${m}`,
+        saleAmount: Math.round(e.saleAmount),
+        cardCount: e.cardCount,
+        unservedSessions: e.unservedSessions,
+      };
+    });
+  }, [filteredCards]);
+
+  const barDisplayData = useMemo(() => {
+    if (statView === 'store') {
+      return storeBarData.map(s => ({
+        label: s.name.replace('旗舰店', '').replace('店', ''),
+        value: s.saleAmount,
+        cardCount: s.cardCount,
+        unserved: s.unserved,
+      }));
+    }
+    if (statView === 'consultant') {
+      return consultantBarData.map(s => ({
+        label: s.name,
+        value: s.saleAmount,
+        cardCount: s.cardCount,
+        unserved: s.unserved,
+      }));
+    }
+    const projMap = new Map<string, number>();
+    filteredCards.forEach(c => {
+      projMap.set(c.projectName, (projMap.get(c.projectName) || 0) + c.saleAmount);
+    });
+    return Array.from(projMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([label, value]) => ({ label, value, cardCount: 0, unserved: 0 }));
+  }, [statView, storeBarData, consultantBarData, filteredCards]);
+
+  const trendUnit: 'currency' | 'number' = trendMetric === 'saleAmount' ? 'currency' : 'number';
 
   if (!overviewStats) return <div className="p-10 text-center text-zinc-500">加载中...</div>;
 
@@ -159,36 +265,157 @@ export const CardOverview: React.FC = () => {
         onReset={resetFilters}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-        <div className="lg:col-span-2">
-          <BarChartCard
-            title="各门店售卡金额"
-            data={storeSaleStats.map(s => ({ label: s.storeName.replace('店', ''), value: s.saleAmount }))}
-            unit="currency"
-            height={260}
-            subtitle={`${filteredCards.length > 0 ? '当前筛选条件下' : '全部'} · 按门店维度统计`}
-          />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-5">
+        <div className="xl:col-span-2 space-y-4">
+          <div className="card">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 size={16} className="text-primary-700" />
+                <div className="section-title !mb-0">售卡金额多维统计</div>
+                <span className="text-xs text-zinc-500 ml-1">
+                  {filteredCards.length < courseCards.length
+                    ? `筛选口径：${formatNumber(filteredCards.length)}/${formatNumber(courseCards.length)}张`
+                    : '全量口径'}
+                </span>
+              </div>
+              <div className="flex items-center rounded-lg border border-zinc-200 bg-white p-1">
+                {([
+                  { key: 'store', label: '门店维度', Icon: Store },
+                  { key: 'project', label: '项目维度', Icon: Layers },
+                  { key: 'consultant', label: '顾问维度', Icon: User2 },
+                ] as { key: StatView; label: string; Icon: any }[]).map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setStatView(key)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all
+                      ${statView === key
+                        ? 'text-white shadow-sm'
+                        : 'text-zinc-600 hover:bg-zinc-50'}`}
+                    style={statView === key ? { background: 'linear-gradient(135deg, #0F4C5C, #31828b)' } : {}}
+                  >
+                    <Icon size={13} /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="p-4">
+              <BarChartCard
+                title=""
+                subtitle=""
+                data={barDisplayData}
+                unit="currency"
+                height={260}
+                showLegend
+                legendItems={[
+                  { color: '#0F4C5C', label: '售卡金额' },
+                  { color: '#E36414', label: '未服务次数' },
+                ]}
+                extraData={barDisplayData.map(d => ({
+                  unserved: d.unserved,
+                  cardCount: d.cardCount,
+                }))}
+              />
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <LineChartIcon size={16} className="text-primary-700" />
+                <div className="section-title !mb-0">成交日期趋势</div>
+              </div>
+              <div className="flex items-center rounded-lg border border-zinc-200 bg-white p-1">
+                {([
+                  { key: 'saleAmount', label: '售卡金额(¥)', Icon: Banknote },
+                  { key: 'cardCount', label: '售卡数量(张)', Icon: CreditCard },
+                  { key: 'unservedSessions', label: '未服务次数', Icon: Clock },
+                ] as { key: TrendMetric; label: string; Icon: any }[]).map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => setTrendMetric(key)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all
+                      ${trendMetric === key
+                        ? 'text-white shadow-sm'
+                        : 'text-zinc-600 hover:bg-zinc-50'}`}
+                    style={trendMetric === key ? { background: 'linear-gradient(135deg, #E36414, #f4a261)' } : {}}
+                  >
+                    <Icon size={13} /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="p-4">
+              <LineChartCard
+                title=""
+                subtitle={<span className="flex items-center gap-1"><CalendarRange size={12} /> 按月汇总，成交日期口径</span>}
+                data={dateTrendData}
+                unit={trendUnit}
+                height={240}
+                dataKey={trendMetric}
+                lineColor={trendMetric === 'saleAmount' ? '#0F4C5C' : trendMetric === 'cardCount' ? '#E36414' : '#2A9D8F'}
+              />
+            </div>
+          </div>
         </div>
-        <PieChartCard
-          title="项目类别售卡占比"
-          data={projectDistribution}
-          height={260}
-          subtitle={<span className="flex items-center gap-1"><Layers size={12} /> 按销售金额占比</span>}
-        />
+
+        <div className="space-y-4">
+          <PieChartCard
+            title="项目类别售卡占比"
+            data={projectPieData}
+            height={280}
+            subtitle={<span className="flex items-center gap-1"><Layers size={12} /> 当前筛选口径下占比</span>}
+          />
+          <div className="card p-4">
+            <div className="section-title flex items-center gap-2 mb-3">
+              <User2 size={15} className="text-primary-700" />
+              顾问售卡 Top 8
+              <span className="text-xs text-zinc-400 ml-auto font-normal">未服务 / 售卡数</span>
+            </div>
+            <div className="space-y-2.5">
+              {consultantBarData.slice(0, 8).map((c, i) => {
+                const total = (c.cardCount + c.unserved) || 1;
+                const unservedPct = c.unserved / total;
+                return (
+                  <div key={c.name} className="flex items-center gap-3">
+                    <span className="w-5 text-center text-xs font-bold text-zinc-400 shrink-0">{i + 1}</span>
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                      {c.name.slice(0, 1)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-medium text-zinc-800 truncate">{c.name}</span>
+                        <span className="font-mono text-primary-700 font-semibold ml-2 shrink-0">{formatCurrencyCompact(c.saleAmount)}</span>
+                      </div>
+                      <div className="relative h-1.5 rounded-full bg-zinc-100 overflow-hidden">
+                        <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-400 to-primary-600 rounded-full" style={{ width: `${(1 - unservedPct) * 100}%` }} />
+                        <div className={`absolute inset-y-0 right-0 rounded-full ${unservedPct > 0.4 ? 'bg-accent-500' : 'bg-accent-300'}`} style={{ width: `${unservedPct * 100}%` }} />
+                      </div>
+                      <div className="text-[10px] text-zinc-500 mt-0.5 flex justify-between">
+                        <span>已核销 <b className="text-emerald-600">{formatNumber(c.cardCount - (c.unserved > c.cardCount ? 0 : c.cardCount - (c.unserved > c.cardCount ? 0 : c.unserved)))}</b></span>
+                        <span>未服务 <b className="text-accent-600">{formatNumber(c.unserved)}</b></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {consultantBarData.length === 0 && (
+                <div className="text-center py-8 text-zinc-400 text-xs">暂无数据</div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="card">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 flex-wrap gap-3">
           <div>
             <div className="section-title">疗程卡明细表</div>
             <div className="text-xs text-zinc-500 mt-1">
               当前筛选共 <span className="font-semibold text-zinc-800">{formatNumber(filteredCards.length)}</span> 条记录
+              · 售卡 <span className="font-semibold text-primary-700">{formatCurrencyCompact(computedStats.totalSaleAmount)}</span>
+              · 待履约 <span className="font-semibold text-accent-600">{formatCurrencyCompact(computedStats.totalPendingAmount)}</span>
+              · 未服务 <span className="font-semibold text-accent-600">{formatNumber(computedStats.totalUnservedSessions)}次</span>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="badge-blue">{formatCurrencyCompact(computedStats.totalSaleAmount)} 售卡</span>
-            <span className="badge-green">{formatCurrencyCompact(computedStats.totalRedeemedAmount)} 已核</span>
-            <span className="badge-orange">{formatCurrencyCompact(computedStats.totalPendingAmount)} 待履约</span>
           </div>
         </div>
         <div className="overflow-x-auto scrollbar-thin">
@@ -214,7 +441,7 @@ export const CardOverview: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredCards.slice(0, 50).map((c, i) => {
+              {filteredCards.slice(0, 50).map((c) => {
                 const rate = calculateFulfillmentRate(c.usedSessions, c.totalSessions);
                 return (
                   <tr key={c.id} className="table-row">

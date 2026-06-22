@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import {
   Bell, Search, User, Calendar, ShieldCheck, Crown,
 } from 'lucide-react';
-import { useAppStore, type UserRole } from '@/store/useAppStore';
+import { useAppStore } from '@/store/useAppStore';
 import { formatDate } from '@/utils/formatters';
 
 const TITLE_MAP: Record<string, { title: string; desc: string; breadcrumb: string[] }> = {
@@ -53,7 +53,7 @@ export const Header: React.FC = () => {
           </div>
 
           <div className="flex items-center rounded-lg border border-zinc-200 bg-white p-1">
-            {(['finance', 'director'] as UserRole[]).map((role) => (
+            {(['finance', 'director'] as const).map((role) => (
               <button
                 key={role}
                 onClick={() => setRole(role)}

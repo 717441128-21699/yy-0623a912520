@@ -1,20 +1,46 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2, Scale, AlertCircle, TrendingUp, Clock, Activity,
   ChevronRight, ArrowDownUp, Gauge, Zap, Users, CheckCircle2, XCircle,
+  FileText, RotateCcw, Repeat, DollarSign, CheckSquare, Square, MessageSquare,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { StatCard } from '@/components/common/StatCard';
 import { Modal } from '@/components/common/Modal';
 import {
-  formatCurrency, formatCurrencyCompact, formatNumber, formatPercent,
+  formatCurrency, formatCurrencyCompact, formatNumber, formatPercent, formatDateTime,
 } from '@/utils/formatters';
-import type { StoreReconSummary, FulfillmentPressure } from '@/shared/types';
+import type { StoreReconSummary, FulfillmentPressure, DiffSourceType } from '@/shared/types';
+
+const DIFF_TYPE_META: Record<DiffSourceType, { label: string; icon: React.ReactNode; bg: string; text: string; badge: string }> = {
+  refund:    { label: '退款差异', icon: <RotateCcw size={13}/>, bg: 'bg-red-50',    text: 'text-red-700',    badge: 'bg-red-100 text-red-700 border-red-200' },
+  transfer:  { label: '转卡差异', icon: <Repeat size={13}/>,    bg: 'bg-indigo-50', text: 'text-indigo-700', badge: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  redemption:{ label: '核销差异', icon: <CheckCircle2 size={13}/>, bg: 'bg-emerald-50', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  sale:      { label: '售卡尾差', icon: <DollarSign size={13}/>, bg: 'bg-primary-50', text: 'text-primary-700', badge: 'bg-primary-100 text-primary-700 border-primary-200' },
+  manual:    { label: '手工调整', icon: <SlidersHorizontal size={13}/>, bg: 'bg-accent-50', text: 'text-accent-700', badge: 'bg-accent-100 text-accent-700 border-accent-200' },
+};
+
+type DrillTab = 'project' | 'diff' | 'logs';
 
 export const StoreReconciliation: React.FC = () => {
-  const { storeReconSummaries, fulfillmentPressure, courseCards, redemptionRecords } = useAppStore();
+  const {
+    storeReconSummaries, fulfillmentPressure, courseCards, redemptionRecords,
+    updateReconStatus,
+  } = useAppStore();
   const [selectedStore, setSelectedStore] = useState<StoreReconSummary | null>(null);
   const [pressureView, setPressureView] = useState(false);
+  const [drillTab, setDrillTab] = useState<DrillTab>('project');
+  const [checkedDiffIds, setCheckedDiffIds] = useState<string[]>([]);
+  const [reconOpinion, setReconOpinion] = useState('');
+  const [adjustmentAmount, setAdjustmentAmount] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedStore && drillTab === 'diff') {
+      const alreadyChecked = (selectedStore.reconLogs || []).map(l => l.sourceId);
+      setCheckedDiffIds(alreadyChecked);
+    }
+  }, [selectedStore, drillTab]);
 
   const overallStats = useMemo(() => {
     const totalOpening = storeReconSummaries.reduce((s, r) => s + r.openingBalance, 0);
@@ -24,7 +50,8 @@ export const StoreReconciliation: React.FC = () => {
     const totalDiff = storeReconSummaries.reduce((s, r) => s + r.difference, 0);
     const abnormalStores = storeReconSummaries.filter(r => Math.abs(r.difference) >= 0.01).length;
     const totalPendingSessions = storeReconSummaries.reduce((s, r) => s + r.pendingSessionsTotal, 0);
-    return { totalOpening, totalSale, totalRedeemed, totalPending, totalDiff, abnormalStores, totalPendingSessions };
+    const finishedStores = storeReconSummaries.filter(r => r.reconStatus === 'finished').length;
+    return { totalOpening, totalSale, totalRedeemed, totalPending, totalDiff, abnormalStores, totalPendingSessions, finishedStores };
   }, [storeReconSummaries]);
 
   const storeDetail = useMemo(() => {
@@ -42,7 +69,14 @@ export const StoreReconciliation: React.FC = () => {
     }, {});
     const projectBreakdown = Object.values(byProject).sort((a, b) => b.pendingAmount - a.pendingAmount);
     const inconsistentCount = storeRedemptions.filter(r => !r.tripartiteConsistent).length;
-    return { storeCards, storeRedemptions, projectBreakdown, inconsistentCount };
+    const diffSources = selectedStore.diffSources || [];
+    const diffByType = diffSources.reduce((acc: Record<DiffSourceType, { count: number; amount: number }>, d) => {
+      if (!acc[d.type]) acc[d.type] = { count: 0, amount: 0 };
+      acc[d.type].count += 1;
+      acc[d.type].amount += Math.abs(d.difference);
+      return acc;
+    }, {} as Record<DiffSourceType, { count: number; amount: number }>);
+    return { storeCards, storeRedemptions, projectBreakdown, inconsistentCount, diffSources, diffByType };
   }, [selectedStore, courseCards, redemptionRecords]);
 
   const avgPressureRatio = useMemo(() => {
@@ -62,6 +96,37 @@ export const StoreReconciliation: React.FC = () => {
     if (ratio >= 0.8) return 'bg-gradient-to-r from-accent-500 to-accent-600';
     if (ratio >= 0.5) return 'bg-gradient-to-r from-yellow-500 to-yellow-500';
     return 'bg-gradient-to-r from-emerald-500 to-emerald-500';
+  };
+
+  const toggleDiff = (id: string) => {
+    setCheckedDiffIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleAllDiff = () => {
+    if (!storeDetail) return;
+    const allIds = storeDetail.diffSources.map(d => d.id);
+    if (checkedDiffIds.length === allIds.length) {
+      setCheckedDiffIds([]);
+    } else {
+      setCheckedDiffIds(allIds);
+    }
+  };
+
+  const handleSubmitRecon = () => {
+    if (!selectedStore || checkedDiffIds.length === 0) return;
+    const adj = parseFloat(adjustmentAmount || '0') || 0;
+    updateReconStatus(selectedStore.storeId, checkedDiffIds, reconOpinion || '对账确认，差异已核实无误', adj);
+    setReconOpinion('');
+    setAdjustmentAmount('');
+  };
+
+  const renderReconStatusBadge = (status?: string, hasDiff?: boolean) => {
+    if (status === 'finished') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"><CheckCircle2 size={11}/> 已完成</span>;
+    if (status === 'processing') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-accent-50 text-accent-700 border border-accent-200"><Clock size={11}/> 处理中</span>;
+    if (hasDiff) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200"><AlertCircle size={11}/> 待对账</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-zinc-50 text-zinc-600 border border-zinc-200"><Square size={11}/> 草稿</span>;
   };
 
   return (
@@ -127,9 +192,9 @@ export const StoreReconciliation: React.FC = () => {
               delay={160}
             />
             <StatCard
-              label="异常门店"
-              value={formatNumber(overallStats.abnormalStores)}
-              subValue={`共${storeReconSummaries.length}家门店`}
+              label="对账完成 / 门店"
+              value={`${formatNumber(overallStats.finishedStores)} / ${formatNumber(storeReconSummaries.length)}`}
+              subValue={`未完成${formatNumber(storeReconSummaries.length - overallStats.finishedStores)}家`}
               icon={<Building2 size={20} />}
               iconBg="bg-indigo-50 text-indigo-700"
               delay={200}
@@ -144,8 +209,14 @@ export const StoreReconciliation: React.FC = () => {
                   门店对账汇总表
                 </div>
                 <div className="text-xs text-zinc-500 mt-1">
-                  公式：期初余额 + 本期售卡 − 本期核销 + 转入 − 转出 − 退款 = 理论期末；与实际期末比对差异
+                  公式：期初余额 + 本期售卡 − 本期核销 + 转入 − 转出 − 退款 = 理论期末；与实际期末比对差异。点击「钻取」可逐笔勾选确认差异
                 </div>
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span> 待对账</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-500"></span> 处理中</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> 已完成</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-400"></span> 草稿</span>
               </div>
             </div>
             <div className="overflow-x-auto scrollbar-thin">
@@ -153,6 +224,7 @@ export const StoreReconciliation: React.FC = () => {
                 <thead className="table-head">
                   <tr>
                     <th className="table-cell">门店</th>
+                    <th className="table-cell w-24 text-center">对账状态</th>
                     <th className="table-cell text-right">期初余额</th>
                     <th className="table-cell text-right">本期售卡</th>
                     <th className="table-cell text-right">本期核销</th>
@@ -187,6 +259,7 @@ export const StoreReconciliation: React.FC = () => {
                             </div>
                           </div>
                         </td>
+                        <td className="table-cell text-center">{renderReconStatusBadge(r.reconStatus, hasDiff)}</td>
                         <td className="table-cell text-right font-mono text-zinc-700">{formatCurrency(r.openingBalance)}</td>
                         <td className="table-cell text-right font-mono text-primary-700 font-semibold">{formatCurrency(r.currentPeriodSale)}</td>
                         <td className="table-cell text-right font-mono text-emerald-700 font-semibold">{formatCurrency(r.currentPeriodRedeemed)}</td>
@@ -214,7 +287,7 @@ export const StoreReconciliation: React.FC = () => {
                         <td className="table-cell text-right font-mono font-semibold text-accent-700">{formatCurrency(r.pendingAmountTotal)}</td>
                         <td className="table-cell text-center">
                           <button
-                            onClick={() => setSelectedStore(r)}
+                            onClick={() => { setSelectedStore(r); setDrillTab('project'); }}
                             className="inline-flex items-center gap-1 text-xs text-primary-700 group-hover:text-primary-800 font-medium px-2 py-1 rounded group-hover:bg-primary-50 transition"
                           >
                             钻取 <ChevronRight size={12} />
@@ -225,6 +298,7 @@ export const StoreReconciliation: React.FC = () => {
                   })}
                   <tr className="bg-zinc-50/80 border-t-2 border-zinc-200">
                     <td className="table-cell font-semibold text-zinc-900 text-sm">合计 / 平均</td>
+                    <td className="table-cell text-center text-xs text-zinc-500">{overallStats.finishedStores}/{storeReconSummaries.length}</td>
                     <td className="table-cell text-right font-mono font-semibold">{formatCurrency(overallStats.totalOpening)}</td>
                     <td className="table-cell text-right font-mono font-semibold text-primary-700">{formatCurrency(overallStats.totalSale)}</td>
                     <td className="table-cell text-right font-mono font-semibold text-emerald-700">{formatCurrency(overallStats.totalRedeemed)}</td>
@@ -232,7 +306,10 @@ export const StoreReconciliation: React.FC = () => {
                       {formatCurrency(storeReconSummaries.reduce((s, r) => s + r.refundAmount, 0))}
                     </td>
                     <td className="table-cell text-right font-mono font-semibold text-indigo-700">
-                      +{formatCurrency(storeReconSummaries.reduce((s, r) => s + r.transferIn - r.transferOut, 0))}
+                      {(() => {
+                        const nt = storeReconSummaries.reduce((s, r) => s + r.transferIn - r.transferOut, 0);
+                        return `${nt >= 0 ? '+' : ''}${formatCurrency(nt)}`;
+                      })()}
                     </td>
                     <td className="table-cell text-right font-mono font-semibold border-l-2 border-zinc-200">
                       {formatCurrency(storeReconSummaries.reduce((s, r) => s + r.theoreticalClosing, 0))}
@@ -387,21 +464,22 @@ export const StoreReconciliation: React.FC = () => {
 
       <Modal
         open={!!selectedStore}
-        onClose={() => setSelectedStore(null)}
+        onClose={() => { setSelectedStore(null); setReconOpinion(''); setAdjustmentAmount(''); }}
         size="2xl"
         title={
           selectedStore && (
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <Building2 size={18} className="text-primary-700" />
               <span className="font-semibold">{selectedStore.storeName}</span>
               <span className="text-zinc-500">·</span>
               <span className="text-sm text-zinc-500">对账明细钻取</span>
+              {renderReconStatusBadge(selectedStore.reconStatus, Math.abs(selectedStore.difference) >= 0.01)}
             </div>
           )
         }
       >
         {selectedStore && storeDetail && (
-          <div className="space-y-5">
+          <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="label-text">疗程卡数量</div>
@@ -416,54 +494,326 @@ export const StoreReconciliation: React.FC = () => {
                 <div className="text-xl font-bold text-red-700 mt-0.5">{formatNumber(storeDetail.inconsistentCount)}</div>
               </div>
               <div className="p-3 rounded-xl bg-primary-50 border border-primary-200">
-                <div className="label-text">对账差异</div>
+                <div className="label-text">对账差异 / 笔数</div>
                 <div className={`text-xl font-bold mt-0.5 ${Math.abs(selectedStore.difference) >= 0.01 ? 'text-red-700' : 'text-emerald-700'}`}>
                   {Math.abs(selectedStore.difference) >= 0.01 ? formatCurrency(selectedStore.difference) : '一致'}
                 </div>
+                <div className="text-[11px] text-zinc-500 mt-0.5">共 {formatNumber(storeDetail.diffSources.length)} 笔差异明细</div>
               </div>
             </div>
 
-            <div>
-              <div className="section-title mb-3 flex items-center gap-2">
-                <Activity size={15} className="text-zinc-500" />
-                项目未履约分布
-              </div>
-              <div className="rounded-xl border border-zinc-200 overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-zinc-50">
-                    <tr className="text-xs text-zinc-500 uppercase tracking-wide">
-                      <th className="px-4 py-2.5 text-left">项目名称</th>
-                      <th className="px-4 py-2.5 text-right">卡数</th>
-                      <th className="px-4 py-2.5 text-right">未服务次数</th>
-                      <th className="px-4 py-2.5 text-right">待履约金额</th>
-                      <th className="px-4 py-2.5 w-48">占比</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {storeDetail.projectBreakdown.slice(0, 10).map((pb, i) => {
-                      const totalPending = storeDetail.projectBreakdown.reduce((s, x) => s + x.pendingAmount, 0);
-                      const pct = totalPending > 0 ? pb.pendingAmount / totalPending : 0;
-                      return (
-                        <tr key={i} className="border-t border-zinc-100">
-                          <td className="px-4 py-2.5 font-medium text-zinc-800 text-sm">{pb.projectName}</td>
-                          <td className="px-4 py-2.5 text-right text-zinc-700 text-sm font-mono">{pb.cardCount}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-primary-700 text-sm font-mono">{formatNumber(pb.pendingSessions)}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold text-accent-700 text-sm font-mono">{formatCurrency(pb.pendingAmount)}</td>
-                          <td className="px-4 py-2.5">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-primary-400 to-primary-600 rounded-full" style={{ width: `${pct * 100}%` }} />
-                              </div>
-                              <span className="text-xs font-mono text-zinc-600 w-10 text-right">{formatPercent(pct, 0)}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-zinc-100">
+              <button
+                onClick={() => setDrillTab('project')}
+                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5
+                  ${drillTab === 'project' ? 'bg-white text-primary-700 shadow-sm' : 'text-zinc-600 hover:text-zinc-800'}`}
+              >
+                <Activity size={14}/> 项目未履约分布
+              </button>
+              <button
+                onClick={() => setDrillTab('diff')}
+                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5 relative
+                  ${drillTab === 'diff' ? 'bg-white text-primary-700 shadow-sm' : 'text-zinc-600 hover:text-zinc-800'}`}
+              >
+                <FileText size={14}/> 差异来源明细
+                {storeDetail.diffSources.length > 0 && (
+                  <span className="absolute -top-0.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
+                    {storeDetail.diffSources.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setDrillTab('logs')}
+                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-1.5
+                  ${drillTab === 'logs' ? 'bg-white text-primary-700 shadow-sm' : 'text-zinc-600 hover:text-zinc-800'}`}
+              >
+                <CheckSquare size={14}/> 对账处理记录
+                {(selectedStore.reconLogs?.length ?? 0) > 0 && (
+                  <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
+                    {selectedStore.reconLogs?.length}
+                  </span>
+                )}
+              </button>
             </div>
+
+            {drillTab === 'project' && (
+              <div>
+                <div className="section-title mb-3 flex items-center gap-2 text-sm">
+                  <Activity size={14} className="text-zinc-500" />
+                  项目维度分布（按未履约金额排序）
+                </div>
+                <div className="rounded-xl border border-zinc-200 overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-zinc-50">
+                      <tr className="text-xs text-zinc-500 uppercase tracking-wide">
+                        <th className="px-4 py-2.5 text-left">项目名称</th>
+                        <th className="px-4 py-2.5 text-right">卡数</th>
+                        <th className="px-4 py-2.5 text-right">未服务次数</th>
+                        <th className="px-4 py-2.5 text-right">待履约金额</th>
+                        <th className="px-4 py-2.5 w-48">占比</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {storeDetail.projectBreakdown.length === 0 ? (
+                        <tr><td colSpan={5} className="px-4 py-10 text-center text-zinc-400 text-sm">暂无未履约卡项</td></tr>
+                      ) : storeDetail.projectBreakdown.slice(0, 15).map((pb, i) => {
+                        const totalPending = storeDetail.projectBreakdown.reduce((s, x) => s + x.pendingAmount, 0);
+                        const pct = totalPending > 0 ? pb.pendingAmount / totalPending : 0;
+                        return (
+                          <tr key={i} className="border-t border-zinc-100">
+                            <td className="px-4 py-2.5 font-medium text-zinc-800 text-sm">{pb.projectName}</td>
+                            <td className="px-4 py-2.5 text-right text-zinc-700 text-sm font-mono">{pb.cardCount}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-primary-700 text-sm font-mono">{formatNumber(pb.pendingSessions)}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-accent-700 text-sm font-mono">{formatCurrency(pb.pendingAmount)}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-gradient-to-r from-primary-400 to-primary-600 rounded-full" style={{ width: `${pct * 100}%` }} />
+                                </div>
+                                <span className="text-xs font-mono text-zinc-600 w-10 text-right">{formatPercent(pct, 0)}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {drillTab === 'diff' && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {(Object.keys(DIFF_TYPE_META) as DiffSourceType[]).map(t => {
+                    const info = storeDetail.diffByType[t];
+                    return (
+                      <div key={t} className={`px-3 py-2 rounded-lg border ${DIFF_TYPE_META[t].badge} flex items-center gap-2`}>
+                        {DIFF_TYPE_META[t].icon}
+                        <span className="text-xs font-semibold">{DIFF_TYPE_META[t].label}</span>
+                        <span className="text-xs font-mono opacity-80">
+                          {info ? `${info.count}笔 / ${formatCurrency(info.amount)}` : '0笔'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="rounded-xl border border-zinc-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between flex-wrap gap-3">
+                    <button
+                      onClick={toggleAllDiff}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 hover:text-primary-700 transition"
+                    >
+                      {checkedDiffIds.length === storeDetail.diffSources.length && storeDetail.diffSources.length > 0
+                        ? <CheckSquare size={15} className="text-primary-600"/>
+                        : <Square size={15}/>}
+                      全选 ({checkedDiffIds.length}/{storeDetail.diffSources.length})
+                    </button>
+                    <div className="text-xs text-zinc-500">
+                      勾选差异项后填写处理意见，点击「提交对账确认」生成处理记录
+                    </div>
+                  </div>
+
+                  {storeDetail.diffSources.length === 0 ? (
+                    <div className="px-4 py-12 text-center">
+                      <CheckCircle2 size={40} className="text-emerald-400 mx-auto mb-3"/>
+                      <div className="text-sm font-semibold text-emerald-700">账实完全一致</div>
+                      <div className="text-xs text-zinc-500 mt-1">该门店本期无任何差异，无需对账处理</div>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[420px] overflow-y-auto scrollbar-thin">
+                      <table className="w-full min-w-[900px]">
+                        <thead className="bg-white sticky top-0 shadow-[0_1px_0_0_rgb(228,228,231)] z-10">
+                          <tr className="text-xs text-zinc-500">
+                            <th className="px-3 py-2.5 w-10"></th>
+                            <th className="px-3 py-2.5 text-left w-24">类型</th>
+                            <th className="px-3 py-2.5 text-left">单号 / 日期</th>
+                            <th className="px-3 py-2.5 text-left">描述</th>
+                            <th className="px-3 py-2.5 text-right w-24">理论金额</th>
+                            <th className="px-3 py-2.5 text-right w-24">实际金额</th>
+                            <th className="px-3 py-2.5 text-right w-28">差异</th>
+                            <th className="px-3 py-2.5 text-left w-32">卡号 / 顾客</th>
+                            <th className="px-3 py-2.5 text-left w-20">操作人</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {storeDetail.diffSources.map((d, i) => {
+                            const alreadyLogged = (selectedStore.reconLogs || []).some(l => l.sourceId === d.id);
+                            const checked = checkedDiffIds.includes(d.id);
+                            const meta = DIFF_TYPE_META[d.type];
+                            return (
+                              <tr key={d.id} className={`border-t border-zinc-100 ${checked ? 'bg-primary-50/40' : ''}`}>
+                                <td className="px-3 py-2.5">
+                                  <button
+                                    onClick={() => toggleDiff(d.id)}
+                                    disabled={alreadyLogged}
+                                    className={`${alreadyLogged ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary-600'} text-zinc-500`}
+                                  >
+                                    {checked ? <CheckSquare size={17} className="text-primary-600"/> : <Square size={17}/>}
+                                  </button>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${meta.badge}`}>
+                                    {meta.icon} {meta.label.replace('差异','').replace('尾差','').replace('调整','')}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  <div className="font-mono text-xs text-primary-700 font-medium">{d.sourceNo}</div>
+                                  <div className="text-[11px] text-zinc-500 mt-0.5">{d.date}</div>
+                                  {alreadyLogged && <div className="text-[10px] text-emerald-600 mt-0.5 inline-flex items-center gap-0.5"><CheckCircle2 size={10}/> 已确认</div>}
+                                </td>
+                                <td className="px-3 py-2.5 text-xs text-zinc-700 max-w-[200px]">
+                                  <div title={d.description}>{d.description}</div>
+                                  {d.remark && <div className="text-[11px] text-zinc-400 mt-0.5">备注：{d.remark}</div>}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-xs font-mono text-zinc-600">{formatCurrency(d.theoreticalAmount)}</td>
+                                <td className="px-3 py-2.5 text-right text-xs font-mono text-zinc-600">{formatCurrency(d.actualAmount)}</td>
+                                <td className="px-3 py-2.5 text-right">
+                                  <span className={`font-mono font-semibold text-xs ${Math.abs(d.difference) >= 0.01 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                    {d.difference >= 0 ? '+' : ''}{formatCurrency(d.difference)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5">
+                                  {d.cardNo ? (
+                                    <>
+                                      <div className="font-mono text-[11px] text-zinc-800">{d.cardNo}</div>
+                                      <div className="text-[11px] text-zinc-500 mt-0.5">{d.customerName || '-'}</div>
+                                    </>
+                                  ) : <span className="text-[11px] text-zinc-400">-</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-[11px] text-zinc-600">{d.operator || '-'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {selectedStore.reconStatus !== 'finished' && storeDetail.diffSources.length > 0 && (
+                  <div className="p-4 rounded-xl border-2 border-primary-200 bg-gradient-to-br from-primary-50/60 via-white to-white space-y-3">
+                    <div className="flex items-center gap-2 text-xs text-primary-700 font-semibold">
+                      <MessageSquare size={13}/> 对账处理提交
+                      <span className="ml-auto font-normal text-zinc-500">已勾选 {checkedDiffIds.length} 笔待确认</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={reconOpinion}
+                      onChange={(e) => setReconOpinion(e.target.value)}
+                      placeholder="请填写对账处理意见，例如：差异为退款审批流程滞后产生，已核实单据齐全，确认入账..."
+                      className="input text-sm"
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <div className="label-text">金额调整(元)</div>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={adjustmentAmount}
+                          onChange={(e) => setAdjustmentAmount(e.target.value)}
+                          placeholder="0.00 不需调整留空"
+                          className="input mt-1 text-sm"
+                        />
+                      </div>
+                      <div className="sm:col-span-2 flex items-end justify-end gap-2">
+                        <button
+                          onClick={() => { setCheckedDiffIds([]); setReconOpinion(''); setAdjustmentAmount(''); }}
+                          className="btn-ghost text-sm"
+                        >
+                          重置
+                        </button>
+                        <button
+                          disabled={checkedDiffIds.length === 0}
+                          onClick={handleSubmitRecon}
+                          className="btn-primary text-sm"
+                        >
+                          <CheckSquare size={14}/> 提交对账确认 ({checkedDiffIds.length}笔)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedStore.reconStatus === 'finished' && (
+                  <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50 flex items-center gap-3">
+                    <CheckCircle2 size={22} className="text-emerald-600 shrink-0"/>
+                    <div className="text-sm">
+                      <div className="font-semibold text-emerald-800">门店对账已完成</div>
+                      <div className="text-emerald-700 mt-0.5">
+                        处理人：{selectedStore.reconFinishedBy || '-'} · 完成时间：{selectedStore.reconFinishedTime ? formatDateTime(selectedStore.reconFinishedTime) : '-'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {drillTab === 'logs' && (
+              <div className="rounded-xl border border-zinc-200 overflow-hidden">
+                {(selectedStore.reconLogs?.length ?? 0) === 0 ? (
+                  <div className="px-4 py-16 text-center">
+                    <FileText size={40} className="text-zinc-300 mx-auto mb-3"/>
+                    <div className="text-sm text-zinc-500">暂无对账处理记录</div>
+                    <div className="text-xs text-zinc-400 mt-1">请切换到「差异来源明细」Tab勾选并提交</div>
+                  </div>
+                ) : (
+                  <div className="max-h-[500px] overflow-y-auto scrollbar-thin">
+                    <table className="w-full">
+                      <thead className="bg-zinc-50 sticky top-0 shadow-[0_1px_0_0_rgb(228,228,231)] z-10">
+                        <tr className="text-xs text-zinc-500">
+                          <th className="px-4 py-2.5 text-left">处理时间</th>
+                          <th className="px-4 py-2.5 text-left w-20">处理人</th>
+                          <th className="px-4 py-2.5 text-left">对应差异单号</th>
+                          <th className="px-4 py-2.5 text-left">处理意见</th>
+                          <th className="px-4 py-2.5 text-right w-28">金额调整</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...(selectedStore.reconLogs || [])].reverse().map((l, i) => {
+                          const src = storeDetail.diffSources.find(d => d.id === l.sourceId);
+                          const meta = src ? DIFF_TYPE_META[src.type] : null;
+                          return (
+                            <tr key={l.id} className="border-t border-zinc-100">
+                              <td className="px-4 py-3 text-xs text-zinc-600 font-mono whitespace-nowrap">{formatDateTime(l.checkTime)}</td>
+                              <td className="px-4 py-3 text-xs text-zinc-800 font-medium">{l.checker}</td>
+                              <td className="px-4 py-3">
+                                {src && meta && (
+                                  <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] border ${meta.badge}`}>
+                                        {meta.icon}
+                                      </span>
+                                      <span className="font-mono text-xs text-primary-700 font-medium">{src.sourceNo}</span>
+                                    </div>
+                                    <div className="text-[10px] text-zinc-500 mt-0.5 truncate max-w-[180px]" title={src.description}>
+                                      {src.description}
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-zinc-700 max-w-[300px]">
+                                <div className="leading-relaxed">{l.checkOpinion}</div>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {l.adjustmentAmount && Math.abs(l.adjustmentAmount) >= 0.01 ? (
+                                  <span className={`font-mono font-semibold text-xs ${l.adjustmentAmount > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                    {l.adjustmentAmount > 0 ? '+' : ''}{formatCurrency(l.adjustmentAmount)}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-zinc-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

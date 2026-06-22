@@ -269,12 +269,22 @@ export const ReportsExport: React.FC = () => {
                   </td>
                   <td className="table-cell text-center"><ApprovalStatusBadge status={a.status} /></td>
                   <td className="table-cell text-center">
-                    <button
-                      onClick={() => openApprovalDetail(a)}
-                      className="inline-flex items-center gap-1 text-xs text-primary-700 group-hover:text-primary-800 font-medium px-2 py-1 rounded group-hover:bg-primary-50 transition"
-                    >
-                      审批 <ArrowRight size={12} />
-                    </button>
+                    {a.status === 'pending_finance' || a.status === 'pending_director' ? (
+                      <button
+                        onClick={() => openApprovalDetail(a)}
+                        className="inline-flex items-center gap-1 text-xs text-primary-700 group-hover:text-primary-800 font-medium px-2 py-1 rounded group-hover:bg-primary-50 transition"
+                      >
+                        审批 <ArrowRight size={12} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => openApprovalDetail(a)}
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded transition group-hover:bg-zinc-50
+                          ${a.status === 'approved' ? 'text-emerald-700' : 'text-red-700'}`}
+                      >
+                        查看 <History size={12} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
